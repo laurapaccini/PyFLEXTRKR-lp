@@ -13,29 +13,30 @@ run_trackstats: True
 run_mergesplit: True
 # Match precipitation to cold pools for filtering
 run_matchpf_cp: True
+# Robust cold pool identification
+run_robustcp: True
 # Map tracking to pixel files
 run_mapfeature: True
 
 # Start/end date and time
-startdate: '20000130.0000'
-enddate: '20000201.0000'
+startdate: '20000321.0000' # '20000311.0000' # '20000130.0600' #'20000328.0000' #'20000130.0000' #'20000126.0000' #'20000328.0000'
+enddate: '20000331.0000' # '20000321.0000' #'20000130.2000' #'20000402.0000' #'20000201.0000' #'20000128.0000'
 
 # Parallel processing set up
 # run_parallel: 1 (local cluster), 2 (Dask MPI)
-run_parallel: 0
+run_parallel: 1
 nprocesses: 64  # Number of processors to use if run_parallel=1
 dask_tmp_dir: '/tmp'  # Dask temporary directory if run_parallel=1
 timeout: 360  # [seconds] Dask timeout limit
 
-databasename: buoyancy_
-# Specify date/time string format in the file name
-# E.g., radar_20181101.011503.nc --> yyyymodd.hhmmss
-# E.g., wrfout_2018-11-01_01:15:00 --> yyyy-mo-dd_hh:mm:ss
+databasename: '' ## No prefix for .h5 files ; old: buoyancy_
+# Specify date/time string format (used for precipitation file matching)
 time_format: 'yyyy-mo-ddThh-mm-ss'
 # Input files directory
-clouddata_path: '/Users/pacc275/local_documents/buoyancy_sub/'
+clouddata_path: '/pscratch/sd/p/paccini/test_runs/output_RCE_600x600_3km_scream_init_2dhighfreq_v2/RCE_600x600_3km/fields2d/' #output_RCE_600x600_3km_scream_init/RCE_600x600_3km_started_2025_06_12-02_13_53_PM/fields2d/' #'/pscratch/sd/p/paccini/temp/output_pinacles/600x600_1km/buoyancy/' #buoyancy_10min_2601_2701/' #/RCE_600x600_3km_init100_late/buoyancy/'
+# clouddata_path: '/pscratch/sd/p/paccini/temp/output_pinacles/RCE_600x600_3km_init100_late/buoyancy/'
 # Working directory for the tracking data
-root_path: '/Users/pacc275/local_documents/output_tracking//tracking_coldpool_sub_testPOS_t4/'
+root_path: '/pscratch/sd/p/paccini/temp/tracking_coldpool_test/tracking_coldpool_match_pr_600_3km_robust_10min_Pfixed_v8_2/'
 # Working sub-directory names
 tracking_path_name: 'tracking'
 stats_path_name: 'stats'
@@ -46,8 +47,8 @@ pixel_path_name: 'cptracking'
 feature_type: 'coldpool'
 
 # Specify data structure
-datatimeresolution: 0.16667     # hours
-pixel_radius: 1.0      # km
+datatimeresolution: 0.16667    # 1 #0.16667    #1  # hours
+pixel_radius: 3.0 #1.0      # km
 time_dimname: 'time'
 x_dimname: 'X'
 y_dimname: 'Y'
@@ -56,29 +57,76 @@ time_coordname: 'time'
 x_coordname: 'X'
 y_coordname: 'Y'
 z_coordname: 'Z'
-field_varname: 'buoyancy'
+# field_varname: 'buoyancy'
+
+# Parameter to specify 2D input
+input_data_type: '2d'  # Use '2d' for pre-computed variables, '3d' for buoyancy calculation
+
+# Cold pool variable names in 2D input files (add these)
+cp_intensity_varname: 'cp_intensity'
+cp_depth_varname: 'cp_depth'
+cp_base_varname: 'cp_base'
+cp_top_varname: 'cp_top'  # optional
+
 
 # Feature detection parameters
 label_method: 'skimage.watershed'
 # Buoyancy parameters
-buoy_thresh: -0.005  # [m/s^2]
-min_cp_depth: 200.  # [m]
-buoy_smooth_sigma: 1  # Gaussian smoothing sigma for cold pool intensity
+# buoy_thresh: -0.005  # [m/s^2]
+min_cp_depth: 200.  # [m] Minimum depth threshold
+buoy_smooth_sigma: 1.5 #2 for v6,v7old #1 for v5 #2 for v3,v4  # Gaussian smoothing sigma for cold pool intensity
 # peak_local_max parameters
-plm_min_distance: 20   # min_distance - distance buffer between maxima; num grid points
+plm_min_distance: 10 #15 v9 #10 v8 #5 v7 #10 for v7old #25 for v6 #20 for v5,v4,v3 #10 #5 #3 # 7 #20   # min_distance - distance buffer between maxima; num grid points
 plm_exclude_border: 0   # exclude_border - distance buffer between maxima and the domain sides; num grid points
-plm_threshold_abs: 4.5   # threshold_abs - minimum magnitude required to define a maxima
+plm_threshold_abs: 1 #0.5 for v3 #0.2 #0.5 #0.8 # 1.5 # Reduce (was 4.5 for 1km grid)   # threshold_abs - minimum magnitude required to define a maxima
 # watershed parameters
-cont_thresh: 1.4142   # contour defining outermost of flood-filled object area
+cont_thresh: 0.8 #0.8 #0.5 for v5,v4 #0.05 for v3 #0.5 #1 #1.4142   # contour defining outermost of flood-filled object area
 compa: 0    #"compactness factor" - (how much you'll let a flood fill spread into a neighbor's domain.)
-min_size: 4  # min number of grids for a cold pool feature
+min_size: 2 #4 #2 #4  # min number of grids for a cold pool feature
+###NEW PARAMETER
+area_thresh:  18 # 27    # [km^2] Scale: 10 km² at 1km → ~27 km² at 3km ;  [km^2] Minimum area to define a cold pool feature
+
+# Precipitation filtering parameters
+linkpf: 1  # Enable precipitation inclusion
+pcp_data_path: '/pscratch/sd/p/paccini/temp/output_pinacles/slices_olr_rain/RCE_600x600_3km_scream_init_2dhighfreq/' 
+# '/pscratch/sd/p/paccini/temp/output_pinacles/slices_olr_rain/RCE_600x600_3km_SCREAMinit/' 
+#'/pscratch/sd/p/paccini/temp/output_pinacles/slices_olr_rain/RCE_600x600_3km_init100/' # '/pscratch/sd/p/paccini/temp/output_pinacles/slices_olr_rain/600km_10min_subset/' # 
+pcp_filebase: 'processed2d_' # Base name of precipitation files
+pcp_time_format: 'yyyy-mo-ddThh-mm-ss' # Time format in precipitation filenames (use same as main data if matching)
+pcp_varname: 'pr' #'RAINNC'  # Name of precipitation variable in input files
+pcp_convert_factor: 6  # Convert to mm/hour if needed - TESTING without conversion
+pf_rr_thres: 1.0  # [mm/hr] Threshold to count as precipitation
+pf_coverage_thresh: 0.2  # 20% coverage requirement
+
+# List of variable names to pass from input to pixel tracking output data
+# These variables will be saved in cloudid_*.nc files for later statistics computation
+pass_varname:
+  - 'imse'
+  - 'VWP' 
+  - 'lhf'
+  - 'shf'
+  - 'windspeed_sfc'
+  - 'u10'
+  - 'v10'
+  - 'T2'
+  - 'qv2'
+  - 'w_500.0'
+  - 'thetav_100.0'
+  - 'qv_100.0'
+
+# Additional variables for statistics computation
+# Variables to compute mean, std, median for each cold pool feature
+# Note: cp_intensity and cp_depth are automatically included in cloudid files
+extra_vars: ['cp_intensity', 'cp_depth', 'imse', 'VWP', 'lhf', 'shf', 'windspeed_sfc', 'u10','v10', 'T2', 'qv2','w_500.0', 'thetav_100.0', 'qv_100.0']
+
+
 
 # Tracking parameters
 timegap: 1.0           # hour
-othresh: 0.5           # overlap percentage threshold
+othresh: 0.2 # 0.5 old           # overlap percentage threshold
 maxnclouds: 1000       # Maximum number of features in one snapshot
 nmaxlinks: 50          # Maximum number of overlaps that any single feature can be linked to
-duration_range: [2, 500]   # A vector [minlength,maxlength] to specify the duration range for the tracks
+duration_range: [2, 500]   #[1, 500]  #[2, 500]   # A vector [minlength,maxlength] to specify the duration range for the tracks
 # Flag to remove short-lived tracks [< min(duration_range)] that are not mergers/splits with other tracks
 # 0:keep all tracks; 1:remove short tracks
 remove_shorttracks: 1
@@ -91,13 +139,19 @@ match_pixel_dt_thresh: 60.0  # seconds
 # Tracking parameters - periodic boundary conditions
 pbc_direction: 'both'  #options are 'x', 'y', 'both' and 'none'
 extended_fraction: 1
-# max_refinements: 2 # Max refinement iterations
 
 # Link merge/split parameters to main tracks
 maintrack_area_thresh: 78.0  # [km^2] Main track area threshold
 maintrack_lifetime_thresh: 0.5  # [hour] Main track duration threshold
 split_duration: 0.3  # [hour] Split tracks <= this length is linked to the main tracks
 merge_duration: 0.3  # [hour] Merge tracks <= this length is linked to the main tracks
+
+# Robust cold pool parameters
+cp_pf_min_area_thresh: 0.0  # Minimum precipitation area fraction threshold
+cp_pf_duration_thresh: 0.5  # [hour] Minimum duration threshold for robust cold pools
+
+# Output file base names
+cprobust_filebase: 'cp_tracks_robust_'  # Base filename for robust cold pool stats
 
 # Define tracked feature variable names
 feature_varname: 'feature_number'
@@ -110,4 +164,11 @@ times_dimname: 'times'
 fillval: -9999
 # Output file base names
 finalstats_filebase: 'trackstats_final_'
+# trackstats_filebase: 'trackstats_first'
+# firststats_filebase: 'trackstats_first_'
 pixeltracking_filebase: 'cptracks_'
+# # NEW 
+# singletrack_filebase: 'track_'  # Base name for single track files
+# tracknumbers_filebase: 'tracknumbers_'  # Base name for track numbers files
+# Output file naming
+pfstats_filebase: 'cptrackpf_stats_'  # Base filename for filtered stats

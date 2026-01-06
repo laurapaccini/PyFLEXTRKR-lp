@@ -10,8 +10,7 @@ Optional arguments:
 --output output_directory (output figure directory)
 --figbasename figure base name (output figure base name)
 """
-__author__ = "Zhe.Feng@pnnl.gov"
-__created_date__ = "26-Jan-2023"
+
 
 import argparse
 import numpy as np
@@ -109,13 +108,13 @@ def label_perimeter(tracknumber, dilationstructure):
     """
     Labels the perimeter on a 2D map from object tracknumber masks.
     """
-    # Get unique tracknumbers that is no nan and > 0 (exclude background)
-    tracknumber_unique = np.unique(tracknumber[~np.isnan(tracknumber) & (tracknumber > 0)]).astype(np.int32)
+    # Get unique tracknumbers that is no nan
+    tracknumber_unique = np.unique(tracknumber[~np.isnan(tracknumber)]).astype(np.int32)
 
     # Make an array to store the perimeter
     tracknumber_perim = np.zeros(tracknumber.shape, dtype=np.int32)
 
-    # Loop over each tracknumbers (excluding 0/background)
+    # Loop over each tracknumbers
     for ii in tracknumber_unique:
         # Isolate the track mask
         itn = tracknumber == ii
@@ -170,8 +169,9 @@ def get_track_stats(trackstats_file, start_datetime, end_datetime, dt_thres):
     """
     # Read track stats file
     dss = xr.open_dataset(trackstats_file)
+    
+
     stats_starttime = dss.base_time.isel(times=0)
-    # import pdb; pdb.set_trace()
     # Convert input datetime to np.datetime64
     stime = np.datetime64(start_datetime)
     etime = np.datetime64(end_datetime)
@@ -180,8 +180,7 @@ def get_track_stats(trackstats_file, start_datetime, end_datetime, dt_thres):
     # Find track initiated within the time window
     idx = np.where((stats_starttime >= stime) & (stats_starttime <= etime))[0]
     ntracks = len(idx)
-    print(ntracks)
-    # print(f'Number of tracks within input period: {ntracks}')
+    print(f'Number of tracks within input period: {ntracks}')
 
     # Calculate track lifetime
     lifetime = dss.track_duration.isel(tracks=idx) * time_res
@@ -228,13 +227,12 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
     pcp = pixel_dict['pcp']
     tn_perim = pixel_dict['tn_perim']
     tn = pixel_dict['tn']
-    # Get track data from dictionary
     ntracks = track_dict['ntracks']
     lifetime = track_dict['lifetime']
     track_bt = track_dict['track_bt']
     track_meanlon = track_dict['track_meanlon']
     track_meanlat = track_dict['track_meanlat']
-
+ 
     dt_thres = track_dict['dt_thres']
     time_res = track_dict['time_res']
     # Get plot info from dictionary
@@ -272,6 +270,7 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
     # mpl.rcParams['font.family'] = 'Helvetica'
     fig = plt.figure(figsize=figsize, dpi=200)
 
+
     # Set GridSpec for left (plot) and right (colorbars)
     gs = gridspec.GridSpec(1, 2, height_ratios=[1], width_ratios=[1, 0.1])
     gs.update(wspace=0.05, left=0.05, right=0.95, top=0.92, bottom=0.08)
@@ -304,39 +303,11 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
     if perim_plot == 'pcolormesh':
         Tn = np.ma.masked_where(tn_perim == 0, tn_perim)
         Tn[Tn > 0] = 10
-        tn1 = ax1.pcolormesh(xx, yy, Tn, cmap='PuOr', zorder=3, alpha=mask_alpha)
+        tn1 = ax1.pcolormesh(xx, yy, Tn, cmap='gray', zorder=3, alpha=mask_alpha)
     elif perim_plot == 'contour':
-        # Use the full features for contouring
-        Tn_full = np.copy(tn.data)
-        
-        # Debug: Check if there are any features
-        unique_full = np.unique(Tn_full[~np.isnan(Tn_full) & (Tn_full > 0)])
-        unique_perim = np.unique(tn_perim[tn_perim > 0])
-        
-        print(f"Full features: {unique_full}")
-        print(f"Perimeter features: {unique_perim}")
-        
-        # if len(unique_full) > 1:  # More than just 0 (background)
-        #     # Method 1: Contour the full features
-        #     Tn_full[Tn_full > 0] = 10
-        #     tn1 = ax1.contour(xx, yy, Tn_full, levels=[5, 15], colors='orange', linewidths=perim_linewidth, zorder=3)
-            
-        #     # Method 2: Also try contouring the perimeter itself
-        #     if len(unique_perim) > 0:
-        #         Tn_perim_plot = np.copy(tn_perim)
-        #         Tn_perim_plot[Tn_perim_plot > 0] = 10
-        #         tn2 = ax1.contour(xx, yy, Tn_perim_plot, levels=[5, 15], colors='red', linewidths=perim_linewidth*0.8, zorder=3)
-        if len(unique_full) > 0:  # Features exist
-            # Create a binary mask for all features
-            feature_mask = np.zeros_like(Tn_full)
-            feature_mask[Tn_full > 0] = 1
-            
-            # Draw contours around the features
-            tn1 = ax1.contour(xx, yy, feature_mask, levels=[0.5], colors='orange', linewidths=perim_linewidth, zorder=3)
-            print(f"Plotted contours for {len(unique_full)} features")
-        
-        else:
-            print("No features found in this frame")
+        Tn = np.copy(tn.data)
+        Tn[Tn > 0] = 10
+        tn1 = ax1.contour(xx, yy, Tn, levels=[9,11], colors='orange', linewidths=perim_linewidth, zorder=3)
     else:
         print(f"ERROR: undefined perim_plot method: {perim_plot}!")
         sys.exit()
@@ -345,6 +316,7 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
     ax1.set_ylim(map_extent[2], map_extent[3])
     ax1.set_xlabel(xlabel)
     ax1.set_ylabel(ylabel)
+
 
     # Precipitation
     cmap = plt.get_cmap(cmaps['pcp_cmap'])
@@ -358,6 +330,7 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
     cb2 = plt.colorbar(cf2, cax=cax2, label=cblabels['pcp_label'], ticks=cbticks['pcp_ticks'],
                        extend='both', orientation='vertical')
 
+
     # Get domain maximum values 
     domain_max_x = map_extent[1] - map_extent[0]
     domain_max_y = map_extent[3] - map_extent[2]
@@ -368,7 +341,7 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
         ilifetime = lifetime.values[itrack]
         itracknum = lifetime.tracks.data[itrack]+1
         idur = (ilifetime / time_res).astype(int)
-        # idiam = track_pf_diam.data[itrack,:idur]
+        
         # Get basetime of the track and the last time
         ibt = track_bt.values[itrack,:idur]
         ibt_end = np.nanmax(ibt)
@@ -418,28 +391,27 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
                 wrapped_init_lon = np.mod(init_lon - map_extent[0], domain_max_x) + map_extent[0]
                 wrapped_init_lat = np.mod(init_lat - map_extent[2], domain_max_y) + map_extent[2]
                 ax1.scatter(wrapped_init_lon, wrapped_init_lat, s=marker_size*2, zorder=4, **marker_style)
-                
+
         # Find the closest time from track times
         idt = np.abs((ibt - pixel_bt).astype('timedelta64[m]'))
         idx_match = np.argmin(idt)
         idt_match = idt[idx_match]
         # Get track data
-        _imeanlon = track_meanlon.data[itrack,idx_match]
-        _imeanlat = track_meanlat.data[itrack,idx_match]
+        _imeanlon = track_meanlon.data[itrack, idx_match]
+        _imeanlat = track_meanlat.data[itrack, idx_match]
 
         # Adjust positions for plotting
         _iwrapped_meanlon = np.mod(_imeanlon - map_extent[0], domain_max_x) + map_extent[0]
         _iwrapped_meanlat = np.mod(_imeanlat - map_extent[2], domain_max_y) + map_extent[2]
-  
+
         # Proceed if time difference is < dt_match
-        if (idt_match < dt_match):
+        if idt_match < dt_match:
             # Overplot tracknumbers at current frame
             if (_iwrapped_meanlon > map_extent[0]) & (_iwrapped_meanlon < map_extent[1]) & \
                 (_iwrapped_meanlat > map_extent[2]) & (_iwrapped_meanlat < map_extent[3]):
                 ax1.text(_iwrapped_meanlon+0.02, _iwrapped_meanlat+0.02, f'{itracknum:.0f}',
                             color='r', size=tracknumber_fontsize, weight='bold', ha='left', va='center', zorder=4)
-  
-  
+                             
     # Thread-safe figure output
     canvas = FigureCanvas(fig)
     canvas.print_png(figname)
@@ -448,6 +420,7 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
     return fig
 
 #-----------------------------------------------------------------------
+
 def work_for_time_loop(datafile, track_dict, map_info, plot_info, config):
     """
     Process data for a single frame and make the plot.
@@ -486,11 +459,14 @@ def work_for_time_loop(datafile, track_dict, map_info, plot_info, config):
         map_extent = [lonmin, lonmax, latmin, latmax]
         map_info['map_extent'] = map_extent
         map_info['subset'] = subset
-    
+
+  
     dilationstructure = make_dilation_structure(perim_thick, pixel_radius, pixel_radius)
 
     # Data variable names
     field_varname = 'tb'
+
+
 
     # Only plot if there is feature in the frame
     # if (np.nanmax(tn) > 0):
@@ -591,6 +567,7 @@ if __name__ == "__main__":
             figsize = [10, 10]
 
     # Specify plotting info
+    
     # Precipitation color levels
     pcp_levels = [2, 3, 4, 5, 6, 8, 10, 15, 20, 30]
     pcp_ticks = pcp_levels
@@ -606,13 +583,17 @@ if __name__ == "__main__":
     pcp_cmap = 'YlGnBu'
     cmaps = {'tb_cmap': tb_cmap, 'pcp_cmap': pcp_cmap}
     titles = {'tb_title': 'IR Brightness Temperature, Precipitation, Tracked MCS (Outline)'}
+
+
+
+
     
     # Scaling factor for x, y coordinates
-    xscale = 1e-3
-    yscale = 1e-3
-
+    xscale = 1 #10
+    yscale = 1 #!0
+   
     plot_info = {
-        'fontsize': 14,     # plot font size
+        'fontsize': 11,     # plot font size
         'cmap': cmaps,
         'levels': levels,
         'cbticks': cbticks, 
@@ -623,9 +604,9 @@ if __name__ == "__main__":
         'remove_oob_high': False,  # mask out-of-bounds high values (> max(levels))
         'mask_alpha': 0.6,   # transparancy alpha for perimeter mask
         'marker_size': 10,   # track symbol marker size
-        'tracknumber_fontsize': 14,
+        'tracknumber_fontsize': 10,
         'perim_plot': 'contour',  # method to plot tracked feature perimeter ('contour', 'pcolormesh')
-        'perim_linewidth': 3.0,  # perimeter line width for 'contour' method
+        'perim_linewidth': 1.5,  # perimeter line width for 'contour' method
         'perim_thick': 2,  # width of the tracked feature perimeter [km]
         'trackpath_linewidth': 1.5, # track path line width
         'trackpath_color': 'blueviolet',    # track path color

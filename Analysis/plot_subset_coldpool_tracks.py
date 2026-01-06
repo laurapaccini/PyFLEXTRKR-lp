@@ -1,7 +1,7 @@
 """
-Demonstrates plotting generic tracks on input variable snapshots.
+Plot cold pool tracks on buoyancy field snapshots.
 
->python plot_subset_generic_tracks_nomap.py -s STARTDATE -e ENDDATE -c CONFIG.yml
+>python plot_subset_coldpool_tracks.py -s STARTDATE -e ENDDATE -c CONFIG.yml
 Optional arguments:
 -p 0 (serial), 1 (parallel)
 --extent lonmin lonmax latmin latmax (subset domain boundary)
@@ -10,8 +10,8 @@ Optional arguments:
 --output output_directory (output figure directory)
 --figbasename figure base name (output figure base name)
 """
-__author__ = "Zhe.Feng@pnnl.gov"
-__created_date__ = "26-Jan-2023"
+__author__ = "Zhe.Feng@pnnl.gov, modified for cold pools"
+__created_date__ = "23-Aug-2025"
 
 import argparse
 import numpy as np
@@ -45,7 +45,7 @@ def four_floats(value):
 def parse_cmd_args():
     # Define and retrieve the command-line arguments...
     parser = argparse.ArgumentParser(
-        description="Plot tracks on input data snapshots."
+        description="Plot cold pool tracks on buoyancy field snapshots."
     )
     parser.add_argument("-s", "--start", help="first time in time series to plot, format=YYYY-mm-ddTHH:MM:SS", required=True)
     parser.add_argument("-e", "--end", help="last time in time series to plot, format=YYYY-mm-ddTHH:MM:SS", required=True)
@@ -56,7 +56,7 @@ def parse_cmd_args():
     parser.add_argument("--figsize", nargs='+', help="figure size (width, height) in inches", type=float, default=None)
     parser.add_argument("--output", help="ouput directory", default=None)
     parser.add_argument("--figbasename", help="output figure base name", default="")
-    parser.add_argument("--trackstats_file", help="MCS track stats file name", default=None)
+    parser.add_argument("--trackstats_file", help="Robust cold pool track stats file name", default=None)
     parser.add_argument("--pixel_path", help="Pixel-level tracknumer mask files directory", default=None)
     parser.add_argument("--time_format", help="Pixel-level file datetime format", default=None)
     args = parser.parse_args()
@@ -152,14 +152,14 @@ def calc_track_center(tracknumber, longitude, latitude):
 #-----------------------------------------------------------------------
 def get_track_stats(trackstats_file, start_datetime, end_datetime, dt_thres):
     """
-    Subset tracks statistics data within start/end datetime
+    Subset robust cold pool tracks statistics data within start/end datetime
 
     Args:
         trackstats_file: string
-            Track statistics file name.
+            Robust cold pool track statistics file name.
         start_datetime: string
             Start datetime to subset tracks.
-        end_datetime: dstring
+        end_datetime: string
             End datetime to subset tracks.
         dt_thres: timedelta
             A timedelta threshold to retain tracks.
@@ -171,7 +171,6 @@ def get_track_stats(trackstats_file, start_datetime, end_datetime, dt_thres):
     # Read track stats file
     dss = xr.open_dataset(trackstats_file)
     stats_starttime = dss.base_time.isel(times=0)
-    # import pdb; pdb.set_trace()
     # Convert input datetime to np.datetime64
     stime = np.datetime64(start_datetime)
     etime = np.datetime64(end_datetime)
@@ -180,8 +179,7 @@ def get_track_stats(trackstats_file, start_datetime, end_datetime, dt_thres):
     # Find track initiated within the time window
     idx = np.where((stats_starttime >= stime) & (stats_starttime <= etime))[0]
     ntracks = len(idx)
-    print(ntracks)
-    # print(f'Number of tracks within input period: {ntracks}')
+    print(f'Number of robust cold pool tracks within input period: {ntracks}')
 
     # Calculate track lifetime
     lifetime = dss.track_duration.isel(tracks=idx) * time_res
@@ -202,7 +200,7 @@ def get_track_stats(trackstats_file, start_datetime, end_datetime, dt_thres):
 #-----------------------------------------------------------------------
 def plot_map(pixel_dict, plot_info, map_info, track_dict):
     """
-    Plotting function.
+    Plotting function for cold pool tracks on buoyancy field.
 
     Args:
         pixel_dict: dictionary
@@ -219,12 +217,14 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
             Figure object.
     """
     
-    
     # Get pixel data from dictionary
     pixel_bt = pixel_dict['pixel_bt']
     xx = pixel_dict['longitude']
     yy = pixel_dict['latitude']
-    fvar = pixel_dict['fvar']
+    cp_intensity = pixel_dict['cp_intensity']
+    cp_depth = pixel_dict['cp_depth']
+    int_buoyancy = pixel_dict['int_buoyancy']
+    wind_speed = pixel_dict['wind_speed']
     pcp = pixel_dict['pcp']
     tn_perim = pixel_dict['tn_perim']
     tn = pixel_dict['tn']
@@ -241,6 +241,7 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
     fontsize = plot_info['fontsize']
     levels = plot_info['levels']
     cmaps = plot_info['cmap']
+    titles = plot_info['titles']
     remove_oob_low = plot_info.get('remove_oob_low', False)
     remove_oob_high = plot_info.get('remove_oob_high', False)
     cblabels = plot_info['cblabels']
@@ -255,7 +256,7 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
     figname = plot_info['figname']
     figsize = plot_info['figsize']
     mask_alpha = plot_info.get('mask_alpha', 1)
-    perim_plot = plot_info.get('perim_plot', 'pcolormesh')
+    perim_plot = plot_info.get('perim_plot', 'contour')
     perim_linewidth = plot_info.get('perim_linewidth', None)
 
     # Map domain, lat/lon ticks, background map features
@@ -269,106 +270,219 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
 
     # Set up figure
     mpl.rcParams['font.size'] = fontsize
-    # mpl.rcParams['font.family'] = 'Helvetica'
     fig = plt.figure(figsize=figsize, dpi=200)
 
-    # Set GridSpec for left (plot) and right (colorbars)
-    gs = gridspec.GridSpec(1, 2, height_ratios=[1], width_ratios=[1, 0.1])
-    gs.update(wspace=0.05, left=0.05, right=0.95, top=0.92, bottom=0.08)
-    # Use GridSpecFromSubplotSpec for panel and colorbar
-    gs_cb = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[1], height_ratios=[1], width_ratios=[0.01,0.01], wspace=5)
-    ax1 = plt.subplot(gs[0])
-    cax1 = plt.subplot(gs_cb[0])
-    cax2 = plt.subplot(gs_cb[1])
+    # Set GridSpec for 2x2 layout (2 rows, 2 columns for plots + colorbars)
+    gs = gridspec.GridSpec(2, 4, height_ratios=[1, 1], width_ratios=[1, 0.05, 1, 0.05])
+    gs.update(wspace=0.25, hspace=0.25, left=0.08, right=0.95, top=0.90, bottom=0.08)
+    
+    # Create subplots and colorbars
+    ax1 = plt.subplot(gs[0, 0])  # Features panel (top-left)
+    ax2 = plt.subplot(gs[0, 2])  # Integrated buoyancy panel (top-right)
+    ax3 = plt.subplot(gs[1, 0])  # Wind speed panel (bottom-left)
+    ax4 = plt.subplot(gs[1, 2])  # Info panel (bottom-right)
+    cax1 = plt.subplot(gs[0, 1])  # Features colorbar
+    cax2 = plt.subplot(gs[0, 3])  # Integrated buoyancy colorbar
+    cax3 = plt.subplot(gs[1, 1])  # Wind speed colorbar
+    
     # Figure title: time
     fig.suptitle(timestr, fontsize=fontsize*1.2)
 
-
     #################################################################
-    # Tb Panel
-    ax1 = plt.subplot(gs[0,0])
-    ax1.set_aspect('auto', adjustable=None)
-    ax1.set_title(titles['tb_title'], loc='left')
-
-    # Plot variable Tb
-    cmap = plt.get_cmap(cmaps['tb_cmap'])
-    norm_ref = mpl.colors.BoundaryNorm(levels['tb_levels'], ncolors=cmap.N, clip=True)
-    # Remove out-of-bounds values
-    if (remove_oob_low):
-        fvar = np.ma.masked_where(fvar < min(levels['tb_levels']), fvar)
-    if (remove_oob_high):
-        fvar = np.ma.masked_where(fvar > max(levels['tb_levels']), fvar)
-    cf1 = ax1.pcolormesh(xx, yy, fvar, norm=norm_ref, cmap=cmap, zorder=2)
-
-    # Overplot tracknumber perimeters
-    if perim_plot == 'pcolormesh':
-        Tn = np.ma.masked_where(tn_perim == 0, tn_perim)
-        Tn[Tn > 0] = 10
-        tn1 = ax1.pcolormesh(xx, yy, Tn, cmap='PuOr', zorder=3, alpha=mask_alpha)
-    elif perim_plot == 'contour':
-        # Use the full features for contouring
-        Tn_full = np.copy(tn.data)
-        
-        # Debug: Check if there are any features
-        unique_full = np.unique(Tn_full[~np.isnan(Tn_full) & (Tn_full > 0)])
-        unique_perim = np.unique(tn_perim[tn_perim > 0])
-        
-        print(f"Full features: {unique_full}")
-        print(f"Perimeter features: {unique_perim}")
-        
-        # if len(unique_full) > 1:  # More than just 0 (background)
-        #     # Method 1: Contour the full features
-        #     Tn_full[Tn_full > 0] = 10
-        #     tn1 = ax1.contour(xx, yy, Tn_full, levels=[5, 15], colors='orange', linewidths=perim_linewidth, zorder=3)
-            
-        #     # Method 2: Also try contouring the perimeter itself
-        #     if len(unique_perim) > 0:
-        #         Tn_perim_plot = np.copy(tn_perim)
-        #         Tn_perim_plot[Tn_perim_plot > 0] = 10
-        #         tn2 = ax1.contour(xx, yy, Tn_perim_plot, levels=[5, 15], colors='red', linewidths=perim_linewidth*0.8, zorder=3)
-        if len(unique_full) > 0:  # Features exist
-            # Create a binary mask for all features
-            feature_mask = np.zeros_like(Tn_full)
-            feature_mask[Tn_full > 0] = 1
-            
-            # Draw contours around the features
-            tn1 = ax1.contour(xx, yy, feature_mask, levels=[0.5], colors='orange', linewidths=perim_linewidth, zorder=3)
-            print(f"Plotted contours for {len(unique_full)} features")
-        
+    # PANEL 1: Features mask with precipitation contours
+    #################################################################
+    ax1.set_aspect('equal', adjustable='box')
+    ax1.set_title(titles['features_title'], loc='left', fontsize=fontsize)
+    
+    # Plot features mask in colors
+    # Create a masked array for features
+    tn_data = tn.data.copy()
+    tn_masked = np.ma.masked_where(tn_data <= 0, tn_data)
+    
+    if not np.ma.is_masked(tn_masked) or not tn_masked.mask.all():
+        cmap_features = plt.get_cmap(cmaps['features_cmap'])
+        unique_features = np.unique(tn_masked.compressed())
+        if len(unique_features) > 0:
+            norm_features = mpl.colors.BoundaryNorm(np.arange(0.5, len(unique_features)+1.5, 1), ncolors=cmap_features.N, clip=True)
+            cf1 = ax1.pcolormesh(xx, yy, tn_masked, norm=norm_features, cmap=cmap_features, zorder=2)
         else:
-            print("No features found in this frame")
+            cf1 = None
     else:
-        print(f"ERROR: undefined perim_plot method: {perim_plot}!")
-        sys.exit()
-    # Set axis
-    ax1.set_xlim(map_extent[0], map_extent[1])
-    ax1.set_ylim(map_extent[2], map_extent[3])
+        cf1 = None
+    
+    # Add precipitation contours
+    pcp_contours = levels['pcp_contours']
+    pcp_masked_contour = np.ma.masked_where(pcp < min(pcp_contours), pcp)
+    if not np.ma.is_masked(pcp_masked_contour) or not pcp_masked_contour.mask.all():
+        cs1 = ax1.contour(xx, yy, pcp_masked_contour, levels=pcp_contours, colors='black', 
+                         linewidths=3.0, linestyles='solid', zorder=3)
+        ax1.clabel(cs1, pcp_contours, inline=True, fontsize=fontsize-2, fmt='%g')
+    
+    # Set axis limits and labels (zoom to 200-500 range)
+    zoom_extent = [220, 370, 250, 400]  # [xmin, xmax, ymin, ymax]
+    ax1.set_xlim(zoom_extent[0], zoom_extent[1])
+    ax1.set_ylim(zoom_extent[2], zoom_extent[3])
     ax1.set_xlabel(xlabel)
     ax1.set_ylabel(ylabel)
+    
+    # Features colorbar
+    if cf1 is not None:
+        cb1 = plt.colorbar(cf1, cax=cax1, label=cblabels['features_label'],
+                           extend='neither', orientation='vertical')
+    
+    #################################################################
+    # PANEL 2: Integrated buoyancy with precipitation contours
+    #################################################################
+    ax2.set_aspect('equal', adjustable='box')
+    ax2.set_title(titles['int_buoyancy_title'], loc='left', fontsize=fontsize)
+    
+    # Plot integrated buoyancy
+    # Create custom sequential colormap with white only at zero
+    # Use a sequential colormap like 'Blues' but modify it
+    cmap_base = plt.get_cmap('Blues_r')
+    n_colors = 256
+    colors = cmap_base(np.linspace(0.2, 1.0, n_colors))  # Skip very light colors at the start
+    
+    # Since our range is -5 to 0, zero is at the very end
+    # We want to make only exact zero values white
+    # Zero corresponds to the last index in our color range
+    zero_idx = n_colors - 1  # Zero is at the end of our -5 to 0 range
+    colors[zero_idx] = [1, 1, 1, 1]  # Set only zero to white
+    
+    cmap_buoyancy = mpl.colors.ListedColormap(colors)
+    norm_buoyancy = mpl.colors.BoundaryNorm(levels['int_buoyancy_levels'], ncolors=cmap_buoyancy.N, clip=True)
+    
+    # Mask out invalid values if needed
+    int_buoyancy_plot = int_buoyancy.copy()
+    if remove_oob_low:
+        int_buoyancy_plot = np.ma.masked_where(int_buoyancy_plot < min(levels['int_buoyancy_levels']), int_buoyancy_plot)
+    if remove_oob_high:
+        int_buoyancy_plot = np.ma.masked_where(int_buoyancy_plot > max(levels['int_buoyancy_levels']), int_buoyancy_plot)
+    
+    cf2 = ax2.pcolormesh(xx, yy, int_buoyancy_plot, norm=norm_buoyancy, cmap=cmap_buoyancy, zorder=2)
+    
+    # Add precipitation contours
+    if not np.ma.is_masked(pcp_masked_contour) or not pcp_masked_contour.mask.all():
+        cs2 = ax2.contour(xx, yy, pcp_masked_contour, levels=pcp_contours, colors='black', 
+                         linewidths=3.0, linestyles='solid', zorder=3)
+        ax2.clabel(cs2, pcp_contours, inline=True, fontsize=fontsize-2, fmt='%g')
+    # # Add features contours
+    # if not np.ma.is_masked(tn_masked) or not tn_masked.mask.all():
+    #     # Create binary mask for all features
+    #     feature_mask = np.zeros_like(tn_data)
+    #     feature_mask[tn_data > 0] = 1
+        
+    #     if np.any(feature_mask > 0):
+    #         cs2 = ax2.contour(xx, yy, feature_mask, levels=[0.5], colors='black', 
+    #                          linewidths=perim_linewidth, zorder=3)
+    
+    # Set axis limits and labels (zoom to 200-500 range)
+    zoom_extent = [220, 370, 250, 400]  # [xmin, xmax, ymin, ymax]
+    ax2.set_xlim(zoom_extent[0], zoom_extent[1])
+    ax2.set_ylim(zoom_extent[2], zoom_extent[3])
+    ax2.set_xlabel(xlabel)
+    # Remove Y-axis label to avoid overlap with colorbar
+    
+    # Integrated buoyancy colorbar
+    cb2 = plt.colorbar(cf2, cax=cax2, label=cblabels['int_buoyancy_label'], 
+                       ticks=cbticks['int_buoyancy_ticks'], extend='both', orientation='vertical')
+    
+    #################################################################
+    # PANEL 3: Wind speed with features contours
+    #################################################################
+    ax3.set_aspect('equal', adjustable='box')
+    ax3.set_title(titles['wind_title'], loc='left', fontsize=fontsize)
+    
+    # Plot wind speed
+    cmap_wind = plt.get_cmap(cmaps['wind_cmap'])
+    norm_wind = mpl.colors.BoundaryNorm(levels['wind_levels'], ncolors=cmap_wind.N, clip=True)
+    
+    # Extract wind data
+    wind_plot = wind_speed.data if hasattr(wind_speed, 'data') else wind_speed
+    if remove_oob_low:
+        wind_plot = np.ma.masked_where(wind_plot < min(levels['wind_levels']), wind_plot)
+    if remove_oob_high:
+        wind_plot = np.ma.masked_where(wind_plot > max(levels['wind_levels']), wind_plot)
+    
+    cf3 = ax3.pcolormesh(xx, yy, wind_plot, norm=norm_wind, cmap=cmap_wind, zorder=2)
+    
+    # Add features contours
+    if not np.ma.is_masked(tn_masked) or not tn_masked.mask.all():
+        # Create binary mask for all features
+        feature_mask = np.zeros_like(tn_data)
+        feature_mask[tn_data > 0] = 1
+        
+        if np.any(feature_mask > 0):
+            cs3 = ax3.contour(xx, yy, feature_mask, levels=[0.5], colors='black', 
+                             linewidths=perim_linewidth, zorder=3)
+    
+    # Set axis limits and labels (zoom to 200-500 range)
+    zoom_extent = [220, 370, 250, 400]  # [xmin, xmax, ymin, ymax]
+    ax3.set_xlim(zoom_extent[0], zoom_extent[1])
+    ax3.set_ylim(zoom_extent[2], zoom_extent[3])
+    ax3.set_xlabel(xlabel)
+    ax3.set_ylabel(ylabel)
+    
+    # Wind speed colorbar
+    cb3 = plt.colorbar(cf3, cax=cax3, label=cblabels['wind_label'], 
+                       ticks=cbticks['wind_ticks'], extend='both', orientation='vertical')
 
-    # Precipitation
-    cmap = plt.get_cmap(cmaps['pcp_cmap'])
-    norm = mpl.colors.BoundaryNorm(levels['pcp_levels'], ncolors=cmap.N, clip=True)
-    pcp_masked = np.ma.masked_where(((pcp < min(levels['pcp_levels']))), pcp)
-    cf2 = ax1.pcolormesh(xx, yy, pcp_masked, norm=norm, cmap=cmap, zorder=2)
-    # Tb Colorbar
-    cb1 = plt.colorbar(cf1, cax=cax1, label=cblabels['tb_label'], ticks=cbticks['tb_ticks'],
-                       extend='both', orientation='vertical')
-    # Precipitation Colorbar
-    cb2 = plt.colorbar(cf2, cax=cax2, label=cblabels['pcp_label'], ticks=cbticks['pcp_ticks'],
-                       extend='both', orientation='vertical')
+    #################################################################
+    # PANEL 4: Precipitation with wind speed contours
+    #################################################################
+    ax4.set_aspect('equal', adjustable='box')
+    ax4.set_title('Precipitation with Vertical Wind Speed Contours', loc='left', fontsize=fontsize)
+    
+    # Plot precipitation in shaded colors
+    # Create precipitation color levels and colormap
+    pcp_levels = np.linspace(0, 10, 21)  # 0 to 10 mm/hr
+    cmap_pcp = plt.get_cmap('Blues')
+    norm_pcp = mpl.colors.BoundaryNorm(pcp_levels, ncolors=cmap_pcp.N, clip=True)
+    
+    # Extract precipitation data and mask low values
+    pcp_plot4 = pcp.copy()
+    pcp_plot4 = np.ma.masked_where(pcp_plot4 < 0.1, pcp_plot4)  # Mask very low precipitation
+    
+    cf4 = ax4.pcolormesh(xx, yy, pcp_plot4, norm=norm_pcp, cmap=cmap_pcp, zorder=2)
+    
+    # Add wind speed contours at 0.3 m/s
+    wind_plot4 = wind_speed.data if hasattr(wind_speed, 'data') else wind_speed
+    wind_contour_levels = [0.3]  # Only 0.3 m/s contour
+    
+    # Check if there are values at the contour level
+    if np.any(wind_plot4 >= 0.3):
+        cs4 = ax4.contour(xx, yy, wind_plot4, levels=wind_contour_levels, colors='red', 
+                         linewidths=3.0, linestyles='solid', zorder=3)
+        ax4.clabel(cs4, wind_contour_levels, inline=True, fontsize=fontsize-2, fmt='%.1f m/s')
+
+    # Set axis limits and labels (zoom to 220-370 range)
+    zoom_extent = [220, 370, 250, 400]  # [xmin, xmax, ymin, ymax]
+    ax4.set_xlim(zoom_extent[0], zoom_extent[1])
+    ax4.set_ylim(zoom_extent[2], zoom_extent[3])
+    ax4.set_xlabel(xlabel)
+    # Remove Y-axis label to avoid overlap with colorbar
+    
+    # Precipitation colorbar for panel 4
+    cax4 = plt.subplot(gs[1, 3])  # Add colorbar for fourth panel
+    cb4 = plt.colorbar(cf4, cax=cax4, label='Precipitation (mm/hr)', 
+                       ticks=np.arange(0, 11, 2), extend='max', orientation='vertical')
+
+    # Define zoom extent for track plotting
+    zoom_extent = [220, 370, 250, 400]  # [xmin, xmax, ymin, ymax]
 
     # Get domain maximum values 
     domain_max_x = map_extent[1] - map_extent[0]
     domain_max_y = map_extent[3] - map_extent[2]
 
-    # Plot track centroids and paths
+    # Plot track centroids and paths on all panels
+    axes_list = [ax1, ax2, ax3, ax4]  # Plot tracks on all four panels
+    
     for itrack in range(0, ntracks):
         # Get duration of the track
         ilifetime = lifetime.values[itrack]
         itracknum = lifetime.tracks.data[itrack]+1
         idur = (ilifetime / time_res).astype(int)
-        # idiam = track_pf_diam.data[itrack,:idur]
+        
         # Get basetime of the track and the last time
         ibt = track_bt.values[itrack,:idur]
         ibt_end = np.nanmax(ibt)
@@ -385,11 +499,9 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
                 # Get adjusted positions
                 adjusted_lon = track_meanlon.values[itrack, idx_cut]
                 adjusted_lat = track_meanlat.values[itrack, idx_cut]
-                # print(adjusted_lon)
 
                 # Wrap positions back into domain for plotting
                 wrapped_lon = np.mod(adjusted_lon - map_extent[0], domain_max_x) + map_extent[0]
-                # print(wrapped_lon)
                 wrapped_lat = np.mod(adjusted_lat - map_extent[2], domain_max_y) + map_extent[2]
 
                 # Identify where wrap-around occurs to split the trajectory
@@ -401,23 +513,22 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
                 split_lon = np.split(wrapped_lon, wrap_indices)
                 split_lat = np.split(wrapped_lat, wrap_indices)
 
-                # import pdb; pdb.set_trace()
+                # Plot each segment separately on all panels
+                for ax in axes_list:
+                    for lon_seg, lat_seg in zip(split_lon, split_lat):
+                        # Ensure there are at least two points to plot a line
+                        if len(lon_seg) >= 2:
+                            ax.plot(lon_seg, lat_seg, lw=trackpath_linewidth, ls='-', color=trackpath_color, zorder=4)
+                        else:
+                            # For single points, plot as markers
+                            ax.scatter(lon_seg, lat_seg, s=marker_size, color=trackpath_color, zorder=4)
 
-                # Plot each segment separately
-                for lon_seg, lat_seg in zip(split_lon, split_lat):
-                    # Ensure there are at least two points to plot a line
-                    if len(lon_seg) >= 2:
-                        ax1.plot(lon_seg, lat_seg, lw=trackpath_linewidth, ls='-', color=trackpath_color, zorder=3)
-                    else:
-                        # For single points, plot as markers
-                        ax1.scatter(lon_seg, lat_seg, s=marker_size, color=trackpath_color, zorder=3,)
-
-                # Initiation location (adjusted)
-                init_lon = track_meanlon.values[itrack, 0]
-                init_lat = track_meanlat.values[itrack, 0]
-                wrapped_init_lon = np.mod(init_lon - map_extent[0], domain_max_x) + map_extent[0]
-                wrapped_init_lat = np.mod(init_lat - map_extent[2], domain_max_y) + map_extent[2]
-                ax1.scatter(wrapped_init_lon, wrapped_init_lat, s=marker_size*2, zorder=4, **marker_style)
+                    # Initiation location (adjusted)
+                    init_lon = track_meanlon.values[itrack, 0]
+                    init_lat = track_meanlat.values[itrack, 0]
+                    wrapped_init_lon = np.mod(init_lon - map_extent[0], domain_max_x) + map_extent[0]
+                    wrapped_init_lat = np.mod(init_lat - map_extent[2], domain_max_y) + map_extent[2]
+                    ax.scatter(wrapped_init_lon, wrapped_init_lat, s=marker_size*2, zorder=5, **marker_style)
                 
         # Find the closest time from track times
         idt = np.abs((ibt - pixel_bt).astype('timedelta64[m]'))
@@ -433,12 +544,12 @@ def plot_map(pixel_dict, plot_info, map_info, track_dict):
   
         # Proceed if time difference is < dt_match
         if (idt_match < dt_match):
-            # Overplot tracknumbers at current frame
-            if (_iwrapped_meanlon > map_extent[0]) & (_iwrapped_meanlon < map_extent[1]) & \
-                (_iwrapped_meanlat > map_extent[2]) & (_iwrapped_meanlat < map_extent[3]):
-                ax1.text(_iwrapped_meanlon+0.02, _iwrapped_meanlat+0.02, f'{itracknum:.0f}',
-                            color='r', size=tracknumber_fontsize, weight='bold', ha='left', va='center', zorder=4)
-  
+            # Overplot tracknumbers at current frame on all panels (only if within zoom extent)
+            if (_iwrapped_meanlon > zoom_extent[0]) & (_iwrapped_meanlon < zoom_extent[1]) & \
+                (_iwrapped_meanlat > zoom_extent[2]) & (_iwrapped_meanlat < zoom_extent[3]):
+                for ax in axes_list:
+                    ax.text(_iwrapped_meanlon+0.02, _iwrapped_meanlat+0.02, f'{itracknum:.0f}',
+                            color='r', size=tracknumber_fontsize, weight='bold', ha='left', va='center', zorder=5)
   
     # Thread-safe figure output
     canvas = FigureCanvas(fig)
@@ -489,11 +600,12 @@ def work_for_time_loop(datafile, track_dict, map_info, plot_info, config):
     
     dilationstructure = make_dilation_structure(perim_thick, pixel_radius, pixel_radius)
 
-    # Data variable names
-    field_varname = 'tb'
+    # Use robust cold pool mask from 'tracknumber' in cptracks_*.nc
+    if 'tracknumber' in ds:
+        robust_mask = ds['tracknumber']
+    else:
+        raise ValueError("tracknumber variable not found in file. Are you using cptracks_*.nc files?")
 
-    # Only plot if there is feature in the frame
-    # if (np.nanmax(tn) > 0):
     # Subset pixel data within the map domain
     if subset == 1:
         map_extent = map_info['map_extent']
@@ -502,41 +614,98 @@ def work_for_time_loop(datafile, track_dict, map_info, plot_info, config):
         latmin, latmax = map_extent[2]-buffer, map_extent[3]+buffer
         mask = (ds['longitude'] >= lonmin) & (ds['longitude'] <= lonmax) & \
                (ds['latitude'] >= latmin) & (ds['latitude'] <= latmax)
-        fvar = ds[field_varname].where(mask == True, drop=True).squeeze()
+        
+        # Apply mask to all variables consistently
+        cp_intensity_sub = ds['cp_intensity'].where(mask == True, drop=True).squeeze()
+        cp_depth_sub = ds['cp_depth'].where(mask == True, drop=True).squeeze()
         pcp_sub = ds['precipitation'].where(mask == True, drop=True).squeeze()
-        tracknumber_sub = ds['cloudtracknumber'].where(mask == True, drop=True).squeeze()
+        wind_sub = ds['w_500.0'].where(mask == True, drop=True).squeeze()
+        qv2_sub = ds['qv2'].where(mask == True, drop=True).squeeze()
+        tracknumber_sub = robust_mask.where(mask == True, drop=True).squeeze()
+        
+        # Get coordinates from the original dataset after applying the same mask
         lon_sub = ds['longitude'].where(mask == True, drop=True).data
         lat_sub = ds['latitude'].where(mask == True, drop=True).data
     else:
-        fvar = ds[field_varname].squeeze()
+        cp_intensity_sub = ds['cp_intensity'].squeeze()
+        cp_depth_sub = ds['cp_depth'].squeeze()
         pcp_sub = ds['precipitation'].squeeze()
-        tracknumber_sub = ds['cloudtracknumber'].squeeze()
+        wind_sub = ds['w_500.0'].squeeze()
+        qv2_sub = ds['qv2'].squeeze()
+        tracknumber_sub = robust_mask.squeeze()
+        
+        # Get coordinates from the original dataset
         lon_sub = ds['longitude'].data
         lat_sub = ds['latitude'].data
+
+    # Calculate integrated buoyancy: int_buoyancy = (cp_intensity**2)/(-2)
+    int_buoyancy_sub = (cp_intensity_sub.data**2) / (-2.0)
 
     # Scale x, y (change units from [m] to [km])
     lon_sub = lon_sub * xscale
     lat_sub = lat_sub * yscale
+    
+    # Check if coordinates are already 2D grids or 1D arrays
+    if lon_sub.ndim == 1 and lat_sub.ndim == 1:
+        # Create 2D coordinate grids for plotting if they are 1D
+        # Use indexing='xy' to ensure proper orientation
+        xx, yy = np.meshgrid(lon_sub, lat_sub, indexing='xy')
+    else:
+        # Use coordinates as they are if already 2D
+        xx, yy = lon_sub, lat_sub
+    
+    # Ensure all data arrays have the same shape as coordinate grids
+    # This helps prevent flipping issues
+    if hasattr(pcp_sub, 'data'):
+        pcp_data = pcp_sub.data
+    else:
+        pcp_data = pcp_sub
+        
+    # # Intentionally flip only the precipitation data
+    # if pcp_data.shape == xx.shape:
+    #     # If shapes match, flip the precipitation data
+    #     pcp_data = np.flipud(pcp_data)
+    #     print(f"Intentionally flipped precipitation data with shape {pcp_data.shape}")
+    # elif pcp_data.shape == (xx.shape[1], xx.shape[0]):
+    #     # If transposition is needed, transpose first then flip
+    #     pcp_data = pcp_data.T
+    #     pcp_data = np.flipud(pcp_data)
+    #     print(f"Transposed and flipped precipitation data from {pcp_sub.shape} to {pcp_data.shape}")
+    # else:
+    #     print(f"Warning: precipitation shape {pcp_data.shape} doesn't match coordinates {xx.shape}")
+    
+    # Update the precipitation data
+    pcp = pcp_data
 
     # Get object perimeters
     tn_perim = label_perimeter(tracknumber_sub.data, dilationstructure)
 
     # Calculates track center locations
-    lon_tn, lat_tn, tn_unique = calc_track_center(tracknumber_sub.data, lon_sub, lat_sub)
+    # Use 1D coordinate arrays for track center calculation if coordinates are 2D
+    if lon_sub.ndim == 2:
+        lon_1d = lon_sub[0, :]  # First row for longitude
+        lat_1d = lat_sub[:, 0]  # First column for latitude
+    else:
+        lon_1d = lon_sub
+        lat_1d = lat_sub
+    lon_tn, lat_tn, tn_unique = calc_track_center(tracknumber_sub.data, xx, yy)
 
     # Plotting variables
     timestr = ds['time'].squeeze().dt.strftime("%Y-%m-%d %H:%M:%S UTC").data
-    # titles = [timestr]
     fignametimestr = ds['time'].squeeze().dt.strftime("%Y%m%d_%H%M%S").data.item()
     figname = f'{figdir}{figbasename}{fignametimestr}.png'
 
     # Put variables in dictionaries
     pixel_dict = {
         'pixel_bt': pixel_bt,
-        'longitude': lon_sub,
-        'latitude': lat_sub,
-        'fvar': fvar,
-        'pcp': pcp_sub,
+        'longitude': xx,  # 2D coordinate grid
+        'latitude': yy,   # 2D coordinate grid
+        'cp_intensity': cp_intensity_sub,
+        'cp_depth': cp_depth_sub,
+        'int_buoyancy': int_buoyancy_sub,
+        'wind_speed': wind_sub,
+        'qv2': qv2_sub,
+        'pcp': pcp,  # Use corrected precipitation data
         'tn': tracknumber_sub,
         'tn_perim': tn_perim,
         'lon_tn': lon_tn,
@@ -552,7 +721,6 @@ def work_for_time_loop(datafile, track_dict, map_info, plot_info, config):
 
     ds.close()
     return 1
-
 
 
 if __name__ == "__main__":
@@ -590,22 +758,59 @@ if __name__ == "__main__":
         else:
             figsize = [10, 10]
 
-    # Specify plotting info
-    # Precipitation color levels
-    pcp_levels = [2, 3, 4, 5, 6, 8, 10, 15, 20, 30]
-    pcp_ticks = pcp_levels
-    # Tb color levels
-    tb_levels = np.arange(180, 300.1, 2)
-    tb_ticks = np.arange(180, 300.1, 20)
-    levels = {'tb_levels': tb_levels, 'pcp_levels': pcp_levels}
+    # Specify plotting info for cold pools
+    # Precipitation contour levels (only 2 and 5 mm/hr)
+    pcp_contours = [2, 5]
+    # Features mask color levels (we'll use discrete colors for each feature)
+    features_levels = np.arange(0, 101, 1)  # Will be adjusted based on actual features
+    features_ticks = np.arange(0, 101, 10)
+    # Integrated buoyancy color levels (-5 to 0)
+    int_buoyancy_levels = np.linspace(-5, 0, 21)
+    int_buoyancy_ticks = np.arange(-5, 1, 1)
+    # Wind speed color levels (-0.2 to 0.2 m/s)
+    wind_levels = np.linspace(-0.2, 0.2, 21)
+    wind_ticks = np.arange(-0.2, 0.3, 0.1)
+    # QV2 color levels ( g/g)
+    qv2_levels = np.linspace(-7.5/1e3, 7.5/1e3, 21)
+    qv2_ticks = np.arange(-7.5/1e3, 7.6/1e3, 5/1e3)
+
+    levels = {
+        'pcp_contours': pcp_contours,
+        'features_levels': features_levels,
+        'int_buoyancy_levels': int_buoyancy_levels,
+        'wind_levels': wind_levels,
+        'qv2_levels': qv2_levels,
+    }
     # Colorbar ticks & labels
-    cbticks = {'tb_ticks': tb_ticks, 'pcp_ticks': pcp_ticks}
-    cblabels = {'tb_label': 'Tb (K)', 'pcp_label': 'Precipitation (mm h$^{-1}$)'}
+    cbticks = {
+        'features_ticks': features_ticks,
+        'int_buoyancy_ticks': int_buoyancy_ticks,
+        'wind_ticks': wind_ticks,
+        'qv2_ticks': qv2_ticks,
+    }
+    cblabels = {
+        'features_label': 'Feature ID',
+        'int_buoyancy_label': 'Integrated Buoyancy (m²/s²)',
+        'wind_label': 'Vertical Wind Speed at 500m (m/s)',
+        'qv2_label': 'Specific humidity at 2m (g/g)'
+    }
     # Colormaps
-    tb_cmap = 'Greys'
-    pcp_cmap = 'YlGnBu'
-    cmaps = {'tb_cmap': tb_cmap, 'pcp_cmap': pcp_cmap}
-    titles = {'tb_title': 'IR Brightness Temperature, Precipitation, Tracked MCS (Outline)'}
+    features_cmap = 'tab20'  # Good for discrete features
+    int_buoyancy_cmap = 'RdBu_r'
+    wind_cmap = 'RdBu_r'
+    qv2_cmap = 'BrBG'
+    cmaps = {
+        'features_cmap': features_cmap,
+        'int_buoyancy_cmap': int_buoyancy_cmap,
+        'wind_cmap': wind_cmap,
+        'qv2_cmap': qv2_cmap,
+    }
+    titles = {
+        'features_title': 'Cold Pool Features with Precipitation Contours',
+        'int_buoyancy_title': 'Integrated Buoyancy with Precipitation Contours',
+        'wind_title': 'Vertical Wind Speed at 500m with Feature Contours',
+        'qv2_title': 'Specific Humidity at 2m with Feature Contours'
+    }
     
     # Scaling factor for x, y coordinates
     xscale = 1e-3
@@ -617,7 +822,8 @@ if __name__ == "__main__":
         'levels': levels,
         'cbticks': cbticks, 
         'cblabels': cblabels,
-        'tb_alpha': 0.7,
+        'titles': titles,
+        'cp_alpha': 0.7,
         'pcp_alpha': 0.9,
         'remove_oob_low': True,   # mask out-of-bounds low values (< min(levels))
         'remove_oob_high': False,  # mask out-of-bounds high values (> max(levels))
@@ -649,13 +855,12 @@ if __name__ == "__main__":
         'draw_state': False,
     }
 
-    # Track stats file
+    # Load config and get paths
     config = load_config(config_file)
     stats_path = config["stats_outpath"]
     pixeltracking_path = config["pixeltracking_outpath"]
     pixeltracking_filebase = config["pixeltracking_filebase"]
-    trackstats_filebase = config["trackstats_filebase"]
-    finalstats_filebase = config.get("finalstats_filebase", None)
+    cprobust_filebase = config.get("cprobust_filebase", "cp_tracks_robust_")
     startdate = config["startdate"]
     enddate = config["enddate"]
     n_workers = config["nprocesses"]
@@ -669,19 +874,16 @@ if __name__ == "__main__":
     # Create a timedelta threshold in minutes
     dt_thres = datetime.timedelta(minutes=track_retain_time_min)
 
-    # If trackstats_file is not specified
+    # If trackstats_file is not specified, use robust cold pool tracks
     if trackstats_file is None:
-        # If finalstats_filebase is present, use it (links merge/split tracks)
-        if finalstats_filebase is None:
-            trackstats_file = f"{stats_path}{trackstats_filebase}{startdate}_{enddate}.nc"
-        else:
-            trackstats_file = f"{stats_path}{finalstats_filebase}{startdate}_{enddate}.nc"
+        trackstats_file = f"{stats_path}{cprobust_filebase}{startdate}_{enddate}.nc"
+    
     if pixeltracking_path is None:
         pixeltracking_path = f"{config['root_path']}{config['pixel_path_name']}/{startdate}_{enddate}/"
 
     # Output figure directory
     if out_dir is None:
-        figdir = f'{pixeltracking_path}quicklooks_trackpaths/'
+        figdir = f'{pixeltracking_path}quicklooks_coldpool_tracks/'
     else:
         figdir = out_dir
     os.makedirs(figdir, exist_ok=True)
@@ -709,7 +911,7 @@ if __name__ == "__main__":
     )
     print(f'Number of pixel files: {len(datafiles)}')
 
-    # Get track stats data
+    # Get robust cold pool track stats data
     track_dict = get_track_stats(trackstats_file, start_datetime_4stats, end_datetime, dt_thres)
 
     # Serial option
