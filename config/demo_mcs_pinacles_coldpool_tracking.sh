@@ -10,49 +10,48 @@
 
 # Specify start/end datetime
 start_date='2000-03-21T00' #'2000-03-01T00' #'1970-02-11T00' #'2000-01-15T00' #'2000-01-26T00' #
-end_date='2000-03-31T00' #'2000-04-17T00' #'1970-02-16T00' #'2000-02-08T00' #'2000-01-28T00' #
+end_date='2000-03-29T00' #'2000-04-17T00' #'1970-02-16T00' #'2000-02-08T00' #'2000-01-28T00' #
 # Plotting map domain (lonmin lonmax latmin latmax)
 map_extent='0. 600. 0. 600.'  # (xmin xmax ymin ymax)
 run_parallel=1
 
 # Specify directory for the demo data
-dir_demo='/pscratch/sd/p/paccini/temp/output_tracking/tracking_cloud_rain_pbc_600x600_3km_scream_init_1h_subset/' # 10min/' #'/pscratch/sd/p/paccini/temp/output_tracking/tracking_cloud_rain_pbc_600x600_3km_init100' #tracking_cloud_rain_pbc_600x600_review' #tracking_cloud_rain_pbc_300x300/' #tracking_cloud_rain_pbc_final_3' #tracking_cloud_rain_pbc_150x150/'
-quicklook_dir=${dir_demo}'/quicklooks_trackpaths_contour/'
-animation_dir=${dir_demo}'/animations_contour/'
-animation_filename=${animation_dir}mcs_tracking_${start_date}_${end_date}.mp4
+dir_demo='/pscratch/sd/p/paccini/temp/tracking_coldpool_test/tracking_coldpool_match_pr_600_3km_robust_10min_Pfixed_v8_2/'
+quicklook_dir=${dir_demo}'/quicklooks_coldpool_tracks_v3/'
+animation_dir=${dir_demo}'/animations_v3/'
+animation_filename=${animation_dir}coldpool_tracking_${start_date}_${end_date}.mp4
 
 # Make quicklook & animation directories
 mkdir -p ${quicklook_dir}
 mkdir -p ${animation_dir}
 
 # Example config file name
-config_file='config_mcs_pinacles_example_600x600_3km.yml'
-#'config_mcs_pinacles_example_600x600_3km_10min.yml' #' #'config_mcs_pinacles_example.yml'
+config_file='config_coldpool_buoyancy.yml'
 
 # Activate PyFLEXTRKR conda environment
 # echo 'Activating PyFLEXTRKR environment ...'
 # source activate pyflex
 
-# # Run tracking
-# echo 'Running PyFLEXTRKR ...'
-# python ../runscripts/run_mcs_tbpf_saag.py ${config_file}
-# echo 'Tracking is done.'
+# Run tracking
+echo 'Running PyFLEXTRKR cold pool tracking ...'
+python ../runscripts/run_generic_tracking.py ${config_file}
+echo 'Cold pool tracking is done.'
 
-# Make quicklook plots
-echo 'Making quicklook plots ...'
-python ../Analysis/plot_subset_tbpf_tracks_pinacles_pbc.py -s ${start_date} -e ${end_date} -c ${config_file} \
+# # Make quicklook plots for cold pools
+echo 'Making cold pool quicklook plots ...'
+python ../Analysis/plot_subset_coldpool_tracks_v2.py -s ${start_date} -e ${end_date} -c ${config_file} \
     -p ${run_parallel} --output ${quicklook_dir} \
     --extent "${map_extent}" --subset 0
-echo 'View quicklook plots here: '${quicklook_dir}
+echo 'View cold pool quicklook plots here: '${quicklook_dir}
 
 # Make animation using ffmpeg
 # Animation settings
 vfscale='1200:-1'
-framerate=2
-echo 'Making animations from quicklook plots ...'
+framerate=4
+echo 'Making cold pool tracking animations from quicklook plots ...'
 # ffmpeg -framerate ${framerate} -pattern_type glob -i ${quicklook_dir}'*.png' -c:v libx264 -r 10 -crf 20 -pix_fmt yuv420p \
 ffmpeg -framerate ${framerate} -pattern_type glob -i ${quicklook_dir}'*.png' -c:v libx264 -crf 20 -pix_fmt yuv420p \
     -y ${animation_filename}
-echo 'View animation here: '${animation_filename}
+echo 'View cold pool animation here: '${animation_filename}
 
-echo 'Demo completed!'
+echo 'Cold pool demo completed!'

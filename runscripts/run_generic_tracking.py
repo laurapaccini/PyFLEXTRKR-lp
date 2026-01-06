@@ -10,9 +10,11 @@ from pyflextrkr.gettracks import gettracknumbers
 from pyflextrkr.trackstats_driver import trackstats_driver
 from pyflextrkr.link_mergesplit_tracks import link_mergesplit_tracks
 from pyflextrkr.mapfeature_driver import mapfeature_driver
-
+from pyflextrkr.matchpf_cp_driver import match_pf_cp_tracks
+from pyflextrkr.robust_cp import define_robust_cp
 # Purpose: Main script for tracking generic features
 # Author: Zhe Feng (zhe.feng@pnnl.gov)
+# Edited by Laura Paccini (laura.paccini@pnnl.gov)
 
 if __name__ == '__main__':
 
@@ -68,8 +70,20 @@ if __name__ == '__main__':
     # Step 5 - Link merge/split tracks to main tracks
     if config['run_mergesplit']:
         finaltrackstats_filename = link_mergesplit_tracks(config)
+    
+    # Step 6 - Match precipitation to cold pools for filtering
+    if config['run_matchpf_cp']:
+        pfstats_filename = match_pf_cp_tracks(config)
+        # Automatically use precipitation-filtered tracks for mapping
+        finalstats_filebase = config['pfstats_filebase']
+    
+    # Step 7 - Identify robust cold pools
+    if config['run_robustcp']:
+        robustcp_filename = define_robust_cp(config)
+        # Use robust cold pool tracks for mapping
+        finalstats_filebase = config['cprobust_filebase']
 
-    # Step 6 - Map tracking to pixel files
+    # Step 8 - Map tracking to pixel files
     if config['run_mapfeature']:
         mapfeature_driver(config, trackstats_filebase=finalstats_filebase)
 

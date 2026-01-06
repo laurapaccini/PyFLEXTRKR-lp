@@ -38,7 +38,15 @@ def idfeature_driver(config):
     elif "tb_pf" in feature_type:
         from pyflextrkr.idclouds_tbpf import idclouds_tbpf as id_feature
     elif "coldpool" in feature_type:
-        from pyflextrkr.idcoldpool import idcoldpool as id_feature
+        # from pyflextrkr.idcoldpool import idcoldpool as id_feature
+        #  Check if using 2D or 3D input data
+        input_data_type = config.get("input_data_type", "3d")
+        if input_data_type == "2d":
+            from pyflextrkr.idcoldpool import idcoldpool_2d as id_feature
+            logger.info("Using 2D cold pool identification")
+        else:
+            from pyflextrkr.idcoldpool import idcoldpool as id_feature
+            logger.info("Using 3D cold pool identification")   
     else:
         logger.critical(f"ERROR: Unknown feature_type: {feature_type}")
         logger.critical("Tracking will now exit.")
@@ -135,14 +143,31 @@ def idfeature_driver(config):
 
         time_format = config["time_format"]
 
-        # Identify files to process
-        infiles_info = subset_files_timerange(
-            clouddata_path,
-            databasename,
-            start_basetime=start_basetime,
-            end_basetime=end_basetime,
-            time_format=time_format,
-        )
+        # Check if we have .h5 files (need special handling)
+        import glob
+        import os
+        h5_files = glob.glob(os.path.join(clouddata_path, "*.h5"))
+        
+        if h5_files and databasename == "":
+            # Handle .h5 files with simulation time coordinates
+            logger.info("Detected .h5 files, using time coordinate-based file discovery")
+            from pyflextrkr.idcoldpool import get_h5_files_timerange
+            infiles_info = get_h5_files_timerange(
+                clouddata_path,
+                start_basetime=start_basetime,
+                end_basetime=end_basetime,
+            )
+        else:
+            # Handle regular netCDF files with filename-based time parsing
+            logger.info("Using filename-based time parsing for netCDF files")
+            infiles_info = subset_files_timerange(
+                clouddata_path,
+                databasename,
+                start_basetime=start_basetime,
+                end_basetime=end_basetime,
+                time_format=time_format,
+            )
+        
         # Get file list
         rawdatafiles = infiles_info[0]
         nfiles = len(rawdatafiles)

@@ -896,11 +896,19 @@ def subset_roll_map(data_array, shift_x_right, shift_y_top, xdim, ydim, fillval=
     # Roll array to avoid periodic boundary condition
     # In X direction (axis 1): roll to the right (positive shift) by shift_x_right
     # In Y direction (axis 0): roll to the top (positive shift) by shift_y_top
+    # print(f"DEBUG subset_roll_map: input shape {data_array.shape}")
+    # print(f"DEBUG subset_roll_map: shift_x_right={shift_x_right}, shift_y_top={shift_y_top}")
+    
     data_array_rolled = np.roll(
         data_array, shift=(np.abs(shift_y_top), np.abs(shift_x_right)), axis=(0,1),
     )
     # Find valid values
     _y, _x = np.where((~np.isnan(data_array_rolled)) & (data_array_rolled != fillval))
+
+    # print(f"DEBUG subset_roll_map: found {len(_y)} valid points")
+    # print(f"DEBUG subset_roll_map: _x = {_x[:10] if len(_x) > 0 else 'EMPTY'}")
+    # print(f"DEBUG subset_roll_map: _y = {_y[:10] if len(_y) > 0 else 'EMPTY'}")
+
     # Get data boundary
     _maxx, _maxy, _minx, _miny = get_cloud_boundary(_x, _y, xdim, ydim)
     # Subset data array
