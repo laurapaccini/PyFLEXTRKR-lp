@@ -2,6 +2,7 @@ import numpy as np
 import os.path
 import sys
 import logging
+import warnings
 import xarray as xr
 from scipy.ndimage import label
 from skimage.measure import regionprops
@@ -216,13 +217,25 @@ def matchtbpf_singlefile(
                         sub_rainrate = np.copy(rainrate_map[miny:maxy, minx:maxx])
                         sub_lon = np.copy(lon_map[miny:maxy, minx:maxx])
                         sub_lat = np.copy(lat_map[miny:maxy, minx:maxx])
-                        # Roll rainrate to avoid periodic boundary condition
-                        sub_rainrate_map = subset_roll_map(
-                            sub_rainrate, shift_x_right, shift_y_top, xdim, ydim,
-                        )
-                        lon_roll = subset_roll_map(sub_lon, shift_x_right, shift_y_top, xdim, ydim)
-                        lat_roll = subset_roll_map(sub_lat, shift_x_right, shift_y_top, xdim, ydim)
-                        roll_flag = True
+                        # Check sub_rainrate array size and 
+                        # make sure there are pixels above the rainrate threshold
+                        if (sub_rainrate.size > 0) and \
+                            (sub_rainrate.shape[0] > 0) and \
+                            (sub_rainrate.shape[1] > 0) and \
+                            (np.any(sub_rainrate > pf_rr_thres)):
+                            # Roll rainrate to avoid periodic boundary condition
+                            sub_rainrate_map = subset_roll_map(
+                                sub_rainrate, shift_x_right, shift_y_top, xdim, ydim,
+                            )
+                            lon_roll = subset_roll_map(sub_lon, shift_x_right, shift_y_top, xdim, ydim)
+                            lat_roll = subset_roll_map(sub_lat, shift_x_right, shift_y_top, xdim, ydim)
+                            roll_flag = True
+                        else:
+                            sub_rainrate_map = sub_rainrate
+                            shift_x_right = 0
+                            shift_y_top = 0
+                            lon_roll = sub_lon
+                            lat_roll = sub_lat
                     else:
                         # Isolate region over the cloud shield
                         sub_rainrate_map = np.copy(rainrate_map[miny:maxy, minx:maxx])
@@ -293,16 +306,19 @@ def matchtbpf_singlefile(
                             logger.debug("PFs present, calculating statistics")
 
                             # Call function to calculate individual PF statistics
-                            pf_stats_dict = calc_pf_stats(
-                                fillval, fillval_f, heavy_rainrate_thresh,
-                                lat, lon, minx, miny, nmaxpf, numpf,
-                                pf_npix, pfnumberlabelmap, pixel_radius,
-                                subdimx, subdimy, sub_rainrate_map,
-                                roll_flag=roll_flag,
-                                lon_roll=lon_roll, lat_roll=lat_roll,
-                                lon_min=lon_min, lon_max=lon_max,
-                                lat_min=lat_min, lat_max=lat_max,
-                            )
+                            with warnings.catch_warnings():
+                                warnings.simplefilter("ignore", category=RuntimeWarning)
+                                
+                                pf_stats_dict = calc_pf_stats(
+                                    fillval, fillval_f, heavy_rainrate_thresh,
+                                    lat, lon, minx, miny, nmaxpf, numpf,
+                                    pf_npix, pfnumberlabelmap, pixel_radius,
+                                    subdimx, subdimy, sub_rainrate_map,
+                                    roll_flag=roll_flag,
+                                    lon_roll=lon_roll, lat_roll=lat_roll,
+                                    lon_min=lon_min, lon_max=lon_max,
+                                    lat_min=lat_min, lat_max=lat_max,
+                                )
 
                             # Save precipitation feature statisitcs
                             npf_save = pf_stats_dict["npf_save"]

@@ -1,4 +1,5 @@
 import sys
+import glob
 import logging
 import xarray as xr
 import pandas as pd
@@ -22,10 +23,9 @@ def idfeature_driver(config):
     logger.info('Identifying features from raw data')
 
     clouddata_path = config["clouddata_path"]
-    databasename = config["databasename"]
+    databasename = config.get("databasename", "")
     start_basetime = config.get("start_basetime", None)
     end_basetime = config.get("end_basetime", None)
-    # time_format = config["time_format"]
     run_parallel = config["run_parallel"]
     feature_type = config["feature_type"]
     input_format = config.get("input_format", "netcdf")
@@ -54,23 +54,61 @@ def idfeature_driver(config):
 
     if input_format.lower() == "zarr":
 
-        # Get precipitation data info from config
-        precipdata_path = config["precipdata_path"]
-        precipdata_basename = config["precipdata_basename"]
-        start_date = config["startdate"]
-        end_date = config["enddate"]
+        if "catalog_file" in config:
+            import intake     # For catalogs
 
-        # OLR Zarr filename
-        fn_olr = f"{clouddata_path}{databasename}.zarr"
-        fn_pr = f"{precipdata_path}{precipdata_basename}.zarr"
-        # Read HEALPix zarr file
-        ds_olr = xr.open_dataset(fn_olr)
-        ds_pr = xr.open_dataset(fn_pr)
+            # Get catalog info from config
+            catalog_file = config["catalog_file"]
+            catalog_location = config.get("catalog_location", None)
+            catalog_source = config["catalog_source"]
+            catalog_params = config.get("catalog_params", {})
+            olr_varname = config['olr_varname']
+            pcp_varname = config['pcp_varname']
+            start_date = config["startdate"]
+            end_date = config["enddate"]
+
+            # Load the catalog
+            logger.info(f"Loading HEALPix catalog: {catalog_file}")
+            in_catalog = intake.open_catalog(catalog_file)
+            if catalog_location is not None:
+                in_catalog = in_catalog[catalog_location]
+
+            # Get the DataSet from the catalog
+            ds = in_catalog[catalog_source](**catalog_params).to_dask()
+
+        else:
+            # Get HEALPix path and basename from config
+            healpix_path = config["healpix_path"]
+            healpix_basename = config["healpix_basename"]
+            start_date = config["startdate"]
+            end_date = config["enddate"]
+            pass_varname = config.get("pass_varname", None)
+
+            # TODO: make file search more robust
+            in_file = sorted(glob.glob(f"{healpix_path}{healpix_basename}*.zarr"))[0]
+            # Read in Zarr data directly
+            ds = xr.open_zarr(in_file)
+
+        # Make a list of required variables based on feature_type
+        if "tb_pf" in feature_type:
+            keep_vars = [olr_varname, pcp_varname]
+        elif "radar_cells" in feature_type:
+            reflectivity_varname = config["reflectivity_varname"]
+            if pass_varname is not None:
+                keep_vars = [reflectivity_varname] + list(pass_varname)
+            else:
+                keep_vars = [reflectivity_varname]
+        else:
+            # Keep all variables for other feature types
+            keep_vars = list(ds.data_vars)
+
+        # Subset to keep only the required variables
+        all_vars = list(ds.data_vars)
+        drop_vars = [var for var in all_vars if var not in keep_vars]
+        ds = ds.drop_vars(drop_vars)
+        
         # Check the calendar type of the time coordinate
-        calendar = ds_olr['time'].dt.calendar
-        # Add coordinates (lat and lon)
-        # ds_olr = ds_olr.pipe(egh.attach_coords)
-        # ds_pr = ds_pr.pipe(egh.attach_coords)
+        calendar = ds['time'].dt.calendar
         # Convert start_date and end_date to pandas.Timestamp
         start_datetime = pd.to_datetime(start_date, format='%Y%m%d.%H%M')
         end_datetime = pd.to_datetime(end_date, format='%Y%m%d.%H%M')
@@ -78,26 +116,23 @@ def idfeature_driver(config):
         start_datetime_cftime = convert_to_cftime(start_datetime, calendar)
         end_datetime_cftime = convert_to_cftime(end_datetime, calendar)
         # Subset the Dataset using the cftime objects
-        ds_olr = ds_olr.sel(time=slice(start_datetime_cftime, end_datetime_cftime))
-        ds_pr = ds_pr.sel(time=slice(start_datetime_cftime, end_datetime_cftime))
+        ds = ds.sel(time=slice(start_datetime_cftime, end_datetime_cftime))
 
         # Get the number of time steps
-        nfiles = ds_olr.sizes['time']
+        nfiles = ds.sizes['time']
         logger.info(f"Total number of time steps to process: {nfiles}")
 
         # Serial
         if run_parallel == 0:
             for ifile in range(0, nfiles):
                 # Subset one time from the DataSets and combine them
-                ds = xr.merge([ds_olr.isel(time=ifile), ds_pr.isel(time=ifile)])
-                id_feature(ds, config)
+                id_feature(ds.isel(time=ifile), config)
         # Parallel
         elif run_parallel >= 1:
             results = []
             for ifile in range(0, nfiles):
                 # Subset one time from the DataSets and combine them
-                ds = xr.merge([ds_olr.isel(time=ifile), ds_pr.isel(time=ifile)])
-                result = dask.delayed(id_feature)(ds, config)
+                result = dask.delayed(id_feature)(ds.isel(time=ifile), config)
                 results.append(result)
             final_result = dask.compute(*results)
             wait(final_result)
