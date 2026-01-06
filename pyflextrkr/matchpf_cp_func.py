@@ -47,6 +47,9 @@ def matchpf_cp_singlefile(
     pbc_direction = config.get("pbc_direction", "none")
     max_feature_frac_x = 0.95   # Max fraction of domain size for a feature in x-direction
     max_feature_frac_y = 0.95   # Max fraction of domain size for a feature in y-direction
+    
+    # Additional variables to compute statistics for
+    extra_vars = config.get("extra_vars", ['cp_intensity', 'cp_depth', 'imse', 'VWP', 'lhf', 'shf', 'windspeed_sfc', 'u10', 'T2', 'qv2'])
 
     fillval = config["fillval"]
     fillval_f = np.nan
@@ -65,6 +68,15 @@ def matchpf_cp_singlefile(
         )
         featuremap = ds[feature_varname].data.squeeze()
         rainratemap = ds["precipitation"].data.squeeze()
+        
+        # Load extra variables if they exist in the file
+        extra_var_data = {}
+        for var in extra_vars:
+            if var in ds:
+                extra_var_data[var] = ds[var].data.squeeze()
+                logger.debug(f"Loaded extra variable: {var}")
+            else:
+                logger.debug(f"Extra variable {var} not found in file")
         
         feature_basetime = ds["base_time"].data.squeeze()
         lon = ds["longitude"].data.squeeze()
@@ -90,6 +102,11 @@ def matchpf_cp_singlefile(
                 "rainrate_mean",
                 "rainrate_max",
             ]
+            # Add extra variable statistics to the list
+            for var in extra_vars:
+                if var in extra_var_data:
+                    var_names_2d.extend([f"{var}_mean", f"{var}_std", f"{var}_median"])
+            
             # Initialize arrays
             pf_area_fraction = np.full(nmatchfeature, fillval_f, dtype=float)
             pf_filtered = np.full(nmatchfeature, False, dtype=bool)
@@ -99,6 +116,14 @@ def matchpf_cp_singlefile(
             rain_lon_max = np.full(nmatchfeature, fillval_f, dtype=float)
             rain_lat_max = np.full(nmatchfeature, fillval_f, dtype=float)
             basetime = np.full(nmatchfeature, fillval_f, dtype=float)
+            
+            # Initialize arrays for extra variable statistics
+            extra_var_stats = {}
+            for var in extra_vars:
+                if var in extra_var_data:
+                    extra_var_stats[f"{var}_mean"] = np.full(nmatchfeature, fillval_f, dtype=float)
+                    extra_var_stats[f"{var}_std"] = np.full(nmatchfeature, fillval_f, dtype=float)
+                    extra_var_stats[f"{var}_median"] = np.full(nmatchfeature, fillval_f, dtype=float)
 
             # Loop over each matched feature number
             for imatchfeature in range(nmatchfeature):
@@ -263,6 +288,42 @@ def matchpf_cp_singlefile(
                     if pf_area_fraction[imatchfeature] >= pf_coverage_thresh:
                         pf_filtered[imatchfeature] = True
                     
+                    # Calculate statistics for extra variables
+                    for var in extra_vars:
+                        if var in extra_var_data:
+                            # Get the variable data for this region
+                            if roll_flag:
+                                # For rolled features, extract the variable data for the region and roll it
+                                sub_var_data = extra_var_data[var][miny:maxy, minx:maxx]
+                                sub_var_rolled = subset_roll_map(
+                                    sub_var_data, shift_x_right, shift_y_top, xdim, ydim
+                                )
+                                # Ensure same shape as feature mask
+                                min_y_var = min(sub_feature_mask.shape[0], sub_var_rolled.shape[0])
+                                min_x_var = min(sub_feature_mask.shape[1], sub_var_rolled.shape[1])
+                                sub_var_values = sub_var_rolled[:min_y_var, :min_x_var]
+                            else:
+                                # For normal features, extract the variable data for the region
+                                sub_var_data = extra_var_data[var][miny:maxy, minx:maxx]
+                                # Ensure same shape as feature mask
+                                min_y_var = min(sub_feature_mask.shape[0], sub_var_data.shape[0])
+                                min_x_var = min(sub_feature_mask.shape[1], sub_var_data.shape[1])
+                                sub_var_values = sub_var_data[:min_y_var, :min_x_var]
+                            
+                            # Extract values only within the feature area
+                            feature_var_values = sub_var_values[sub_feature_mask[:min_y_var, :min_x_var]]
+                            
+                            if len(feature_var_values) > 0:
+                                # Calculate statistics
+                                extra_var_stats[f"{var}_mean"][imatchfeature] = np.nanmean(feature_var_values)
+                                extra_var_stats[f"{var}_std"][imatchfeature] = np.nanstd(feature_var_values)
+                                extra_var_stats[f"{var}_median"][imatchfeature] = np.nanmedian(feature_var_values)
+                            else:
+                                # No valid data for this variable
+                                extra_var_stats[f"{var}_mean"][imatchfeature] = fillval_f
+                                extra_var_stats[f"{var}_std"][imatchfeature] = fillval_f
+                                extra_var_stats[f"{var}_median"][imatchfeature] = fillval_f
+                    
                     # Enhanced debugging - always log the first few features and any filtered ones
                     if imatchfeature < 10 or pf_filtered[imatchfeature]:
                         logger.info(f"Feature {ittfeaturenumber}: total_area={total_feature_area}, "
@@ -345,6 +406,13 @@ def matchpf_cp_singlefile(
                 "rain_lat_max": rain_lat_max,
             }
             
+            # Add extra variable statistics to output dictionary
+            for var in extra_vars:
+                if var in extra_var_data:
+                    out_dict[f"{var}_mean"] = extra_var_stats[f"{var}_mean"]
+                    out_dict[f"{var}_std"] = extra_var_stats[f"{var}_std"]
+                    out_dict[f"{var}_median"] = extra_var_stats[f"{var}_median"]
+            
             out_dict_attrs = {
                 "pf_area_fraction": {
                     "long_name": "Fraction of feature area covered by precipitation",
@@ -383,6 +451,25 @@ def matchpf_cp_singlefile(
                     "_FillValue": fillval_f,
                 },
             }
+            
+            # Add attributes for extra variables
+            for var in extra_vars:
+                if var in extra_var_data:
+                    out_dict_attrs[f"{var}_mean"] = {
+                        "long_name": f"Mean {var} within feature",
+                        "units": "varies",  # Will depend on the variable
+                        "_FillValue": fillval_f,
+                    }
+                    out_dict_attrs[f"{var}_std"] = {
+                        "long_name": f"Standard deviation of {var} within feature",
+                        "units": "varies",  # Will depend on the variable
+                        "_FillValue": fillval_f,
+                    }
+                    out_dict_attrs[f"{var}_median"] = {
+                        "long_name": f"Median {var} within feature",
+                        "units": "varies",  # Will depend on the variable
+                        "_FillValue": fillval_f,
+                    }
 
             return out_dict, out_dict_attrs, var_names_2d
 

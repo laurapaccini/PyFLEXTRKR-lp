@@ -395,8 +395,15 @@ def idcoldpool(
                     try:
                         ds_pcp = xr.open_dataset(pcp_file)
                         if pcp_varname in ds_pcp:
-                            # Get precipitation data
-                            precip_data = ds_pcp[pcp_varname].values * pcp_convert_factor
+                            # Check dimension order and transpose if needed
+                            pcp_var = ds_pcp[pcp_varname]
+                            if pcp_var.dims[-2:] == ('X', 'Y'):
+                                # Transpose to match expected (time, Y, X) order
+                                precip_data = pcp_var.values.transpose(0, 2, 1) * pcp_convert_factor
+                                logger.info("Transposed precipitation data from (time, X, Y) to (time, Y, X)")
+                            else:
+                                # Already in correct order
+                                precip_data = pcp_var.values * pcp_convert_factor
                             has_precip = True
                             logger.info(f"Successfully loaded precipitation data from variable '{pcp_varname}'")
                             logger.info(f"Precipitation data stats: min={np.min(precip_data):.6f}, max={np.max(precip_data):.6f}, mean={np.mean(precip_data):.6f}")
@@ -592,6 +599,16 @@ def idcoldpool(
             "Contact": "Zhe Feng: zhe.feng@pnnl.gov",
             "Created_on": time.ctime(time.time()),
             "min_size": min_size,
+            # Watershed segmentation parameters
+            "plm_min_distance": config.get("plm_min_distance"),
+            "plm_threshold_abs": config.get("plm_threshold_abs"), 
+            "plm_exclude_border": config.get("plm_exclude_border"),
+            "cont_thresh": config.get("cont_thresh"),
+            "buoy_smooth_sigma": config.get("buoy_smooth_sigma"),
+            "area_thresh": config.get("area_thresh"),
+            "label_method": config.get("label_method"),
+            "buoy_thresh": config.get("buoy_thresh"),
+            "min_cp_depth": config.get("min_cp_depth"),
         }
         # Add each parameter to global attribute dictionary
         for key in param_dict:
@@ -756,7 +773,15 @@ def idcoldpool_2d(
                     try:
                         ds_pcp = xr.open_dataset(pcp_file)
                         if pcp_varname in ds_pcp:
-                            precip_data = ds_pcp[pcp_varname].values * pcp_convert_factor
+                            # Check dimension order and transpose if needed
+                            pcp_var = ds_pcp[pcp_varname]
+                            if pcp_var.dims[-2:] == ('X', 'Y'):
+                                # Transpose to match expected (time, Y, X) order
+                                precip_data = pcp_var.values.transpose(0, 2, 1) * pcp_convert_factor
+                                logger.info("Transposed precipitation data from (time, X, Y) to (time, Y, X)")
+                            else:
+                                # Already in correct order
+                                precip_data = pcp_var.values * pcp_convert_factor
                             has_precip = True
                         ds_pcp.close()
                     except Exception as e:
@@ -865,12 +890,20 @@ def idcoldpool_2d(
         gattr_dict = {
             "Title": f"FeatureID file from {file_datestring}.{file_timestring}",
             "Institution": "Pacific Northwest National Laboratory", 
-            "Contact": "Zhe Feng: zhe.feng@pnnl.gov",
+            "Contact": "Laura Paccini: laurapaccini@gmail.com",
             "Created_on": time.ctime(time.time()),
             "min_size": min_size,
             "min_cp_intensity": min_cp_intensity,
             "min_cp_depth": min_cp_depth,
             "input_data_type": "2d",
+            # Watershed segmentation parameters
+            "plm_min_distance": config.get("plm_min_distance"),
+            "plm_threshold_abs": config.get("plm_threshold_abs"), 
+            "plm_exclude_border": config.get("plm_exclude_border"),
+            "cont_thresh": config.get("cont_thresh"),
+            "buoy_smooth_sigma": config.get("buoy_smooth_sigma"),
+            "area_thresh": config.get("area_thresh"),
+            "label_method": config.get("label_method"),
         }
         for key in param_dict:
             gattr_dict[key] = param_dict[key]
